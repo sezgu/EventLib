@@ -1,0 +1,23 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="CollectorEventTests.cpp" />
+    <ClCompile Include="EventTests.cpp" />
+    <ClCompile Include="pch.cpp" />
+    <ClCompile Include="CombinerEventTests.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="..\include\Event.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{e0ee9043-ffb6-4ec5-b5e0-02ba521cc14f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
