@@ -18,15 +18,15 @@ namespace EventLib
 	template<typename T>
 	struct EventResult
 	{
-		EventResult(T&& ins) :Value{std::forward<T>(ins)} ,m_hasValue(true){}
-		EventResult() : Value{GetDefault()}, m_hasValue(false){}
+		EventResult(T&& ins) :Value{ std::forward<T>(ins) }, m_hasValue(true){}
+		EventResult() : Value{ GetDefault() }, m_hasValue(false){}
 		bool HasValue() { return m_hasValue; }
 		using ConstType = typename std::add_const<typename std::remove_reference<T>::type>::type;
-		T& operator=(ConstType& value) { Value = value; return Value;}
-		EventResult(const EventResult<T>& other):Value(other.Value),m_hasValue(other.m_hasValue){}
+		T& operator=(ConstType& value) { Value = value; return Value; }
+		EventResult(const EventResult<T>& other) :Value(other.Value), m_hasValue(other.m_hasValue) {}
 	private:
 		std::remove_reference_t <T>* m_null_ptr{ nullptr };
-		
+
 		template <typename = std::enable_if<!std::is_reference_v<T>>::type>
 		T GetDefault() { return T(); }
 		template <typename = std::enable_if<std::is_reference_v<T>>::type, typename = void>
@@ -40,33 +40,23 @@ namespace EventLib
 	template<>
 	struct EventResult<void>
 	{
-		EventResult(){}
+		EventResult() {}
 	};
-	
-	template<typename R, typename ...Args>
+
+	template<typename TReturn, typename ...Args>
 	class EventSource
 	{
 	protected:
 		std::shared_ptr<std::recursive_mutex> m_accessLock;
-		EventSource(): m_accessLock{ std::make_shared<std::recursive_mutex>() }{}
-		virtual EventSubscription AddSubscription(const std::function<R(Args...)>& func) const = 0;
+		EventSource() : m_accessLock{ std::make_shared<std::recursive_mutex>() } {}
+		virtual EventSubscription AddSubscription(const std::function<TReturn(Args...)>& func) const = 0;
 		virtual void RemoveSubscription(EventSubscription& subscription) const = 0;
 		virtual ~EventSource() = default;
 	public:
-		EventSubscription operator+=(const std::function<R(Args...)>& func) const
+		EventSubscription operator+=(const std::function<TReturn(Args...)>& func) const
 		{
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			return AddSubscription(func);
-		}
-
-		template <typename T>
-		using MethodType = R(T::*)(Args...);
-
-		template <typename T>
-		EventSubscription attach(T* instance, MethodType<T> method) const
-		{
-			std::function<R(Args...)> func = [instance, method](Args&&... args) { return std::invoke(method, *instance, std::forward<Args>(args)...); };
-			return operator+=(func);
 		}
 
 		void operator-=(EventSubscription& subscription) const
@@ -74,10 +64,22 @@ namespace EventLib
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			RemoveSubscription(subscription);
 		}
+
+		template <typename T>
+		using MethodType = TReturn(T::*)(Args...);
+
+		template <typename T>
+		EventSubscription attach(T* instance, MethodType<T> method) const
+		{
+			std::function<TReturn(Args...)> func = [instance, method](Args&&... args) { return std::invoke(method, *instance, std::forward<Args>(args)...); };
+			return operator+=(func);
+		}
+
+
 	};
 
-	template<typename C,typename R,typename ...Args>
-	class EventBase : public EventSource<R,Args...>
+	template<typename TResult, typename TReturn, typename ...Args>
+	class EventBase : public EventSource<TReturn, Args...>
 	{
 	private:
 		int GetToken() const
@@ -91,6 +93,19 @@ namespace EventLib
 			}
 			return max + 1;
 		}
+		void Remove(Subscription* subscription) const
+		{
+			//No locking here, subscription will lock to call this.
+			for (auto& sub : m_subscriptions)
+			{
+				if (&(sub.second.get()) == subscription)
+				{
+					m_subscriptions.erase(sub.first);
+					break;
+				}
+			}
+		}
+
 	protected:
 		struct Subscription final : public ::EventLib::Subscription
 		{
@@ -99,7 +114,7 @@ namespace EventLib
 			Subscription(Subscription&& other) = default;
 			Subscription& operator=(Subscription&& other) = default;
 
-			Subscription(const EventBase& container, int token, const std::function<R(Args...)>& func)
+			Subscription(const EventBase& container, int token, const std::function<TReturn(Args...)>& func)
 				: m_accessLock(container.m_accessLock)
 				, m_detached(false)
 				, m_container(&container)
@@ -107,7 +122,7 @@ namespace EventLib
 				, m_func(func)
 			{}
 
-			R Call(Args&& ... args)
+			TReturn Call(Args&& ... args)
 			{
 				//No locking here, container will lock to call this.
 				return m_func(std::forward<Args>(args)...);
@@ -132,12 +147,12 @@ namespace EventLib
 			bool m_detached;
 			const EventBase* m_container;
 			int m_token;
-			std::function<R(Args...)> m_func;
+			std::function<TReturn(Args...)> m_func;
 		};
-		
+
 		mutable std::map<int, std::reference_wrapper<Subscription>> m_subscriptions{};
 
-		EventSubscription AddSubscription(const std::function<R(Args...)>& func) const override
+		EventSubscription AddSubscription(const std::function<TReturn(Args...)>& func) const override
 		{
 			auto token = GetToken();
 			auto retval = std::make_unique<Subscription>(*this, token, func);
@@ -151,63 +166,44 @@ namespace EventLib
 			Subscription* ptr = dynamic_cast<Subscription*>(subscription.get());
 			if (ptr)
 			{
-				for (auto& sub : m_subscriptions)
-				{
-					if (&(sub.second.get()) == ptr)
-					{
-						m_subscriptions.erase(sub.first);
-						ptr->Detach();
-						break;
-					}
-				}
+				Remove(ptr);
 			}
 		}
 
-		template <typename = std::enable_if<!std::is_void_v<R>>::type>
-		static EventResult<R> Wrap(Subscription& sub,Args&&... args)
+		template <typename = std::enable_if<!std::is_void_v<TReturn>>::type>
+		static EventResult<TReturn> Wrap(Subscription& sub, Args&&... args)
 		{
-			return EventResult<R>{sub.Call(std::forward<Args>(args)...)};
+			return EventResult<TReturn>{sub.Call(std::forward<Args>(args)...)};
 		}
 
-		template <typename = std::enable_if<std::is_void_v<R>>::type,typename = void>
+		template <typename = std::enable_if<std::is_void_v<TReturn>>::type, typename = void>
 		static EventResult<void> Wrap(Subscription& sub, Args&&... args)
 		{
 			sub.Call(std::forward<Args>(args)...);
 			return EventResult<void>{};
 		}
 	public:
-		EventBase() : EventSource(){}
+		EventBase() : EventLib::EventSource<TReturn, Args ...>() {}
 
 		virtual ~EventBase()
 		{
-			std::lock_guard<std::recursive_mutex> lock{*m_accessLock};
+			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			for (auto& sub : m_subscriptions)
 			{
 				sub.second.get().Detach();
 			}
 		}
 
-		virtual C Invoke(Args&&... args) = 0;
+		virtual TResult Invoke(Args&&... args) = 0;
 
-		void Remove(Subscription* subscription) const
-		{
-			//No locking here, subscription will lock to call this.
-			for (auto& sub : m_subscriptions)
-			{
-				if (&(sub.second.get()) == subscription)
-				{
-					m_subscriptions.erase(sub.first);
-					break;
-				}
-			}
-		}
+		
 	};
 
-	template<typename R,typename ...Args>
-	class Event : public EventBase<EventResult<R>,R,Args...>
+	template<typename TReturn, typename ...Args>
+	class Event : public EventBase<EventResult<TReturn>, TReturn, Args...>
 	{
 	public:
-		EventResult<R> Invoke(Args&&... args) override 
+		EventResult<TReturn> Invoke(Args&&... args) override
 		{
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
@@ -220,62 +216,62 @@ namespace EventLib
 				}
 				else
 				{
-					return Wrap(iter->second.get(),std::forward<Args>(args)...);
+					return Wrap(iter->second.get(), std::forward<Args>(args)...);
 				}
 			}
-			return EventResult<R>{};
+			return EventResult<TReturn>{};
 		}
 	};
 
-	template<typename R,typename ...Args>
-	class CollectorEvent : public EventBase<std::vector<EventResult<R>>, R, Args...>
+	template<typename TReturn, typename ...Args>
+	class CollectorEvent : public EventBase<std::vector<EventResult<TReturn>>, TReturn, Args...>
 	{
 	public:
-		std::vector<EventResult<R>> Invoke(Args&&... args) override
+		std::vector<EventResult<TReturn>> Invoke(Args&&... args) override
 		{
-			std::vector<EventResult<R>> results{};
+			std::vector<EventResult<TReturn>> results{};
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
 			for (auto iter = copiedSubscriptions.begin(); iter != copiedSubscriptions.end(); ++iter)
 			{
-				if (!std::is_void<R>::value)
+				if (!std::is_void<TReturn>::value)
 				{
-					results.emplace_back(EventResult<R>{iter->second.get().Call(std::forward<Args>(args)...)});
+					results.emplace_back(EventResult<TReturn>{iter->second.get().Call(std::forward<Args>(args)...)});
 				}
 			}
 			return results;
 		}
 	};
 
-	template<typename R, typename ...Args>
-	class CombinerEvent : public EventBase<EventResult<R>, R, Args...>
+	template<typename TReturn, typename ...Args>
+	class CombinerEvent : public EventBase<EventResult<TReturn>, TReturn, Args...>
 	{
 	public:
 
-	private :
-		R Combine(const R& first, const R& second) { return m_combiner(const_cast<R&>(first), const_cast<R&>(second));}
-		std::function<R(R&, R&)> m_combiner;
+	private:
+		TReturn Combine(const TReturn& first, const TReturn& second) { return m_combiner(const_cast<TReturn&>(first), const_cast<TReturn&>(second)); }
+		std::function<TReturn(TReturn&, TReturn&)> m_combiner;
 	public:
-		CombinerEvent(std::function<R(R&, R&)> combiner)
+		CombinerEvent(std::function<TReturn(TReturn&, TReturn&)> combiner)
 			: m_combiner(combiner)
 		{}
-		EventResult<R> Invoke(Args&&... args) override
+		EventResult<TReturn> Invoke(Args&&... args) override
 		{
-			std::unique_ptr<EventResult<R>> result = std::make_unique<EventResult<R>>();
+			std::unique_ptr<EventResult<TReturn>> result = std::make_unique<EventResult<TReturn>>();
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 
 			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
 			for (auto iter = copiedSubscriptions.begin(); iter != copiedSubscriptions.end(); ++iter)
 			{
-				if (!std::is_void<R>::value)
+				if (!std::is_void<TReturn>::value)
 				{
 					if (!result->HasValue())
 					{
-						result = std::make_unique<EventResult<R>>(iter->second.get().Call(std::forward<Args>(args)...));
+						result = std::make_unique<EventResult<TReturn>>(iter->second.get().Call(std::forward<Args>(args)...));
 					}
 					else
 					{
-						result = std::make_unique<EventResult<R>>(Combine(result->Value,iter->second.get().Call(std::forward<Args>(args)...)));
+						result = std::make_unique<EventResult<TReturn>>(Combine(result->Value, iter->second.get().Call(std::forward<Args>(args)...)));
 					}
 				}
 			}
@@ -283,14 +279,25 @@ namespace EventLib
 		}
 	};
 
+
+#define __EVENT(type,access,returnType,eventName,...)													    \
+	private: 																								    \
+	##access:																								    \
+		inline const ::EventLib::EventSource<returnType,__VA_ARGS__>& eventName() const{return m_##eventName;}	\
+	private:																								    \
+		type<returnType,__VA_ARGS__> m_##eventName
+
 	/*PUT THIS TO THE PRIVATE SECTION OF YOUR TYPE*/
-	#define __EVENT(type,access,returnType,eventName,...)													\
-	private: 																								\
-	##access:																								\
-		inline const ::EventLib::EventSource<returnType,__VA_ARGS__>& eventName(){return m_##eventName;}	\
-	private:																								\
-		::EventLib::Event<returnType,__VA_ARGS__> m_##eventName
-	#define EVENT(access,returnType,eventName,...) __EVENT(::EventLib::Event,access,returnType,eventName,__VA_ARGS__){}
-	#define COLLECTOREVENT(access,returnType,eventName,...) __EVENT(::EventLib::CollectorEvent,access,returnType,eventName,__VA_ARGS__){}
-	#define COMBINEREVENT(access,returnType,eventName,combiner,...) __EVENT(::EventLib::CombinerEvent,access,returnType,eventName,__VA_ARGS__){combiner}
+#define EVENT_ITF(access,returnType,eventName,...)                                                      \
+    private:                                                                                                \
+    ##access:                                                                                               \
+        virtual const ::EventLib::EventSource<returnType, __VA_ARGS__>& eventName() const = 0                     
+
+	/*PUT THIS TO THE END OF PRIVATE SECTION OF YOUR TYPE*/
+#define EVENT(access,returnType,eventName,...) __EVENT(::EventLib::Event,access,returnType,eventName,__VA_ARGS__){}
+/*PUT THIS TO THE END OF PRIVATE SECTION OF YOUR TYPE*/
+#define COLLECTOREVENT(access,returnType,eventName,...) __EVENT(::EventLib::CollectorEvent,access,returnType,eventName,__VA_ARGS__){}
+/*PUT THIS TO THE END OF PRIVATE SECTION OF YOUR TYPE*/
+#define COMBINEREVENT(access,returnType,eventName,combiner,...) __EVENT(::EventLib::CombinerEvent,access,returnType,eventName,__VA_ARGS__){combiner}
+
 }
