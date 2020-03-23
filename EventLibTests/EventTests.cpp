@@ -196,6 +196,23 @@ TEST(EventTests, InvokeRefReturnMultiSubs)
 
 }
 
+
+TEST(EventTests, MoveOnlyArg)
+{
+	Event<void,std::unique_ptr<int>> myEvent{};
+	
+	std::unique_ptr<int> value;
+	auto sub = myEvent += [&](std::unique_ptr<int> val)
+	{
+		value = std::move(val);
+	};
+
+	myEvent.Invoke(std::make_unique<int>(5));
+
+	ASSERT_TRUE(value != nullptr);
+	ASSERT_EQ(5, *value);
+}
+
 namespace ClassEvent
 {
 	class ClassWithEvent
@@ -254,3 +271,4 @@ TEST(EventTests, NonCopyableResult)
 	ASSERT_EQ(nullptr, otherResult.Value);
 
 }
+

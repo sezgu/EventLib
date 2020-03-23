@@ -194,7 +194,7 @@ namespace EventLib
 			}
 		}
 
-		virtual TResult Invoke(Args&&... args) = 0;
+		virtual TResult Invoke(Args ... args) = 0;
 
 		
 	};
@@ -203,7 +203,7 @@ namespace EventLib
 	class Event : public EventBase<EventResult<TReturn>, TReturn, Args...>
 	{
 	public:
-		EventResult<TReturn> Invoke(Args&&... args) override
+		EventResult<TReturn> Invoke(Args... args) override
 		{
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
 			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
@@ -227,7 +227,7 @@ namespace EventLib
 	class CollectorEvent : public EventBase<std::vector<EventResult<TReturn>>, TReturn, Args...>
 	{
 	public:
-		std::vector<EventResult<TReturn>> Invoke(Args&&... args) override
+		std::vector<EventResult<TReturn>> Invoke(Args... args) override
 		{
 			std::vector<EventResult<TReturn>> results{};
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
@@ -255,7 +255,7 @@ namespace EventLib
 		CombinerEvent(std::function<TReturn(TReturn&, TReturn&)> combiner)
 			: m_combiner(combiner)
 		{}
-		EventResult<TReturn> Invoke(Args&&... args) override
+		EventResult<TReturn> Invoke(Args... args) override
 		{
 			std::unique_ptr<EventResult<TReturn>> result = std::make_unique<EventResult<TReturn>>();
 			std::lock_guard<std::recursive_mutex> lock{ *m_accessLock };
