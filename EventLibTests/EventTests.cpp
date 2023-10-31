@@ -1,4 +1,5 @@
 #include "pch.h"
+#define ENABLE_EVENT_MACROS
 #include "Event.h"
 #include <string>
 
@@ -43,7 +44,7 @@ namespace SubUnsubMethodRecursive
 		}
 	public:
 		EventClient(const EventSource<void, bool&, int&>& event,std::function<void()> trigger)
-			:sub(event.attach(this, &EventClient::Method))
+			:sub(event += [this](bool& value, int& counter) { Method(value, counter);})
 			, m_trigger(trigger)
 		{
 		}
@@ -78,7 +79,7 @@ TEST(EventTests, UnsubInEventCall)
 	EventSubscription sub;
 	sub = myEvent+= [&myEvent,&sub]() -> int
 	{
-		myEvent -= sub;
+		sub = nullptr;
 		return 5;
 	};
 
