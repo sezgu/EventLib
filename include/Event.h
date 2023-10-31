@@ -256,7 +256,7 @@ namespace EventLib
 		{
 			std::vector<EventResult<TReturn>> results{};
 			std::lock_guard<std::recursive_mutex> lock{ this->get_access_lock() };
-			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
+			auto copiedSubscriptions = this->m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
 			for (auto iter = copiedSubscriptions.begin(); iter != copiedSubscriptions.end(); ++iter)
 			{
 				if (!std::is_void<TReturn>::value)
@@ -285,7 +285,7 @@ namespace EventLib
 			std::unique_ptr<EventResult<TReturn>> result = std::make_unique<EventResult<TReturn>>();
 			std::lock_guard<std::recursive_mutex> lock{ this->get_access_lock() };
 
-			auto copiedSubscriptions = m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
+			auto copiedSubscriptions = this->m_subscriptions; //Subscriptions are copied because a subscription might be destroyed in the event call.
 			for (auto iter = copiedSubscriptions.begin(); iter != copiedSubscriptions.end(); ++iter)
 			{
 				if (!std::is_void<TReturn>::value)
